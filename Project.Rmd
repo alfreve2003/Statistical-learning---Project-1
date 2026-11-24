@@ -1,29 +1,192 @@
 ---
-title: "Project"
-output: html_document
-date: "2026-11-24"
+title: "Assignment 1: Image denoising and classification"
+author: "Nombre 1, Nombre 2"
+output:
+  html_document:
+    toc: false
+    number_sections: false
 ---
 
+
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 8, fig.height = 5)
 ```
 
-## R Markdown
+# 0. Introduction
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+The aim of this assignment is to study how noise affects image data and classification performance, and to investigate whether Principal Component Analysis (PCA) can be used to obtain lower dimensional representations and reconstruct less noisy images. In this assignment, we are working with the MNIST dataset, which consists of grayscale images of handwritten digits (0–9), each of size 28 × 28 pixels. We are going to generate noisy versions of the images using the multivariate normal distribution, apply PCA, and compare the performance of different classification methods.
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+As there will be several processes which contain some randomness or stochasticity, in order to guarantee the results reproducibility, it is necessary to set a seed. In our case, it will be 42.
 
-```{r cars}
-summary(cars)
+```{r }
+seed <- 42
 ```
 
-## Including Plots
+# Part 1. Data exploration and preparation
 
-You can also embed plots, for example:
+## 1.1
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+First, we are going to load the dataset and analyze its main properties. 
+
+```{r }
+load("MNIST.RData")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+The dataset consists of two elements. x_MNIST represents the images (one row per image), while y_MINST contains the number each image corresponds to. Along the project we are going to print several times some of the images, so i is important to get a function which takes the matrix associated and displays the resulting image.
+
+
+```{r}
+show_digit <- function(v, title = "") {
+  img <- matrix(v, nrow = 28, ncol = 28, byrow = TRUE) # we convert a vector into a 28x28   matrix
+  image(t(img[28:1, ]), # we plot the image rotated in order to see the number properly
+        col = gray.colors(256, start = 1, end = 0), # colors parameters
+        axes = FALSE, main = title)
+
+}
+```
+
+The next step is to describe the main characteristics of the dataset.
+
+```{r}
+dim(x_MNIST) # dimension of matrix x_MNIST
+length(y_MNIST) # length of vector y_MNIST
+table(y_MNIST) # Frequency table of numbers
+range(x_MNIST) # Range of pixel values
+sum(is.na(x_MNIST)) 
+sum(is.na(y_MNIST))
+# We check if there is some missing value
+```
+
+We see, as expected, that we have 60000 thousand images, each one of 784 pixels (28 x 28), everyone corresponding to a written number. Frequency table of y_MNIST tells us the distribution of those numbers (it looks like quite uniform), while the range of pixels goes from 0 to 255. We also see there are no missing values.
+
+Let's study more deeply the pixels distribution. First, we are going to see the proportion of pixels corresponding to 0 or 255
+
+```{r}
+mean(x_MNIST == 0)
+mean(x_MNIST == 255)
+```
+We have obtained that approximately 80 % of pixels have value 0, which means the distribution is considerably focused in one of the edges. In the future, this will be important when generating noisy version of images.
+
+Now we study the variability of pixels across images. Each pixel corresponds to a column of X_MNIST, so this quantity is measured with the vector variance.
+
+```{r}
+pixel_sd <- apply(x_MNIST, 2, sd)  
+sum(pixel_sd == 0)            
+```
+
+We obtain 67 pixels whose variance is 0. This means they have the same value across all images or, equivalently, they do not give any information. This will have several implications while doing dimensional reduction with PCA.
+
+Before going with train-test split, we are going to scale x_MNIST. Having values in $[0,1]$ instead of $[0,255]$ will allow us to have a better interpretation of the results without losing information.
+```{r}
+x_MNIST <- x_MNIST / 255       
+```
+
+Now, we proceed with train-test split. We select 70 % train, 15% validation and 15% test.
+```{r}
+set.seed(seed)
+
+n <- nrow(x_MNIST)
+idx <- sample(1:n) # reordering in order to split randomly
+
+n_train <- round(0.70 * n)          
+n_val <- round(0.15 * n)        
+
+idx_train <- idx[1:n_train]
+idx_val <- idx[(n_train + 1):(n_train + n_val)]
+idx_test <- idx[(n_train + n_val + 1):n]
+
+X_train <- x_MNIST[idx_train, ] 
+y_train <- y_MNIST[idx_train]
+X_val <- x_MNIST[idx_val, ]
+y_val <- y_MNIST[idx_val]
+X_test <- x_MNIST[idx_test, ]
+y_test <- y_MNIST[idx_test]
+
+c(train = nrow(X_train), validation = nrow(X_val), test = nrow(X_test))
+```
+Traditionally, it is splitted 70% train and 30 % test. We have considerably great amount of images (60000), so 42000 in train allows PCA and classification models to get a good global idea about the data. Since this moment, we are going to work with train dataset.
+
+## 1.2)
+Now we are going to plot some example images, in particular 3 per digit, using function defined in the initial part.
+```{r}
+par(mfrow = c(5,6), mar = c(0.1,0.1,0.1,0.1))
+
+for (d in 0:9) {
+  id <- sample(which(y_train == d), 3)
+  for (i in id) {
+    show_digit(X_train[i,])
+  }
+}
+  
+par(mfrow =c(1,1), mar = c(5,4,4,2) + 0.1)
+```
+Matrix representation models the image as a 28 x 28 matrix. On the other hand, vector representation just takes all the pixels and puts them in a vector living in $\mathcal{R}^{28^2} = \mathcal{R}^{784}$ by placing the rows of the matrix one after another. Both are equivalent, since they contain exactly the same information. The only difference is that the vector representation does not explicitly take into account the spatial structure of the image (which pixels are neighbours of each other): two horizontally adjacent pixels are consecutive elements of the vector, but two vertically adjacent pixels are 28 positions apart. As a consequence, methods such as PCA treat the 784 pixels as ordinary variables, without using the fact that nearby pixels tend to have similar values.
+
+Talking about within-class variety, for each number, we compute the standard deviation for each pixel of every image in the class, and later the average of all those deviations
+
+```{r}
+sd_within <- rep(0,10)
+
+for (d in 0:9) {
+  sd_within[d+1] <- mean(apply (X_train[y_train == d,], 2, sd))
+}
+
+names(sd_within) <- 0:9
+barplot(sd_within, col = "blue", main = "Within-class variability (training set)", xlab = "Digit", ylab = "Average pixel standard deviation")
+```
+We can appreciate that the order of standard deviation is $10^{-1}$ for all the classes. Additionally, the majority of them are around $0.15$ except of number 1, which is the least variable class with a standard deviation around $0.10$.
+
+To study the similarity between classes, we compute the Euclidean distance between the mean images of the different digits, that is, between their sample mean vectors $\underline{\bar{x}}_0, \ldots, \underline{\bar{x}}_9 \in \mathbb{R}^{784}$. We use the Euclidean distance because all pixels are measured on the same scale, and the Mahalanobis distance cannot be computed since the sample covariance matrix is singular (some pixels have zero variance).
+
+```{r}
+class_means <- matrix(0, nrow = 10, ncol = 784)
+
+
+for (d in 0:9) {
+  class_means[d + 1, ] <- colMeans(X_train[y_train == d, ])
+}
+
+rownames(class_means) <- 0:9
+
+D <- as.matrix(dist(class_means)) # distance between rows (average image of each class)
+
+library(corrplot)
+corrplot(D,
+         is.corr = FALSE,          # it is not a correlation matrix
+         method = "color",
+         type = "upper",           
+         diag = FALSE,             # without diagonal
+         addCoef.col = "black",    # value in each cell
+         number.cex = 0.7,
+         tl.col = "black",
+         col = colorRampPalette(c("red", "white", "blue"))(200),
+         title = "Distance between the mean images of each digit",
+         mar = c(0, 0, 2, 0))
+
+```
+
+The distances should be interpreted in relative terms, since their absolute value depends on the pixel scale and on the number of pixels. The most similar pair of digits is 4 and 9 (distance 2.48), which differ mainly in whether the top of the digit is closed. Other close pairs are 7 and 9 (2.99) and the digits 3, 5 and 8 (distances between 3.10 and 3.63). On the other hand, the most different pair is 0 and 1 (7.55): a ring and a vertical stroke have almost no ink pixels in common. Digits whose mean images are close are expected to be harder to distinguish, so we expect these would be the most difficult cases for our classification models.
+
+## 1.3) 
+Now we are going to study the distribution of observations among the different classes. As we saw in 1.1), frequency table showed the classes were pretty balanced. This is also supported with the relative frequencies:
+```{r}
+prop.table(table(y_MNIST))
+percentage <- round(prop.table(table(y_MNIST))*100, 2)
+barplot(percentage, col = "blue", ylim = c(0, 15),
+        main = "Percentage of images per digit",
+        xlab = "Digit", ylab = "% of images")
+abline(h = 10, lty = 2, col = "red")   # 10 % line (perfectly balanced)
+legend("topright", legend = "Perfect balance (10% per digit)",
+       lty = 2, col = "red", bty = "n")
+```
+The barplot shows clearly that there is no significant imbalance, as all the classes percentage are considerably close to the perfect balance line. This fact has several implications, such as making accurracy a reliable metric.
+
+However, we have checked balancing in the total dataset. In order to guarantee a good model performance, each split must have a similar behaviour, which means they need to be also balanced. We check it now:
+
+```{r}
+round(100 * rbind(train      = prop.table(table(y_train)),
+                  validation = prop.table(table(y_val)),
+                  test       = prop.table(table(y_test))), 2)
+```
+We obtain similar results, so our division is appropiate for the following tasks.
