@@ -194,13 +194,13 @@ We obtain similar results, so our division is appropriate for the following task
 
 # Part 2. Noise generation using the multivariate normal distribution.
 ## 2.1
-In this section we will add random noise to our training dataset. We will generate three noise levels using a multivariate normal distribution. Given the vector $\mathbf{x}_i\in\mathbb{R}^784$ corresponding to image $i$, the noisy version will be:
+In this section we will add random noise to our training dataset. We will generate three noise levels using a multivariate normal distribution. Given the vector $\mathbf{x}_i\in\mathbb{R}^{784}$ corresponding to image $i$, the noisy version will be:
 $$\mathbf{x}_i^* = \mathbf{x}_i + \epsilon_i,$$
-where $\epsilon_i$ is obtained from the distribuition $\mathcal{N}_784(\mathbf{0},\sigma^2\mathbf{I}_784)$.
+where $\epsilon_i$ is obtained from the distribution $\mathcal{N}_{784}(\mathbf{0},\sigma^2\mathbf{I}_784)$.
 
 As the noise has mean 0, adding the noise to the images will not make them any brighter or darker, on average
 
-The covariance matrix of the noise distribution, $\Sigma = \sigma^2\mathbf{I}_784$, is a scalar matrix. This implies the noise components for each pixel are uncorrelated and identically distributed. Furthermore, as the noise generated follows a multivariate normal distribuition, the components corresponding to each pixel will be independent from each other.
+The covariance matrix of the noise distribution, $\Sigma = \sigma^2\mathbf{I}_{784}$, is a scalar matrix. This implies the noise components for each pixel are uncorrelated and identically distributed. Furthermore, as the noise generated follows a multivariate normal distribution, the components corresponding to each pixel will be independent from each other.
 
 The marginal distribution of each noise component is therefore $\mathcal{N}(0,\sigma^2)$.
 
