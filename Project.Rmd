@@ -134,6 +134,7 @@ for (d in 0:9) {
 names(sd_within) <- 0:9
 barplot(sd_within, col = "blue", main = "Within-class variability (training set)", xlab = "Digit", ylab = "Average pixel standard deviation")
 ```
+
 We can appreciate that the order of standard deviation is $10^{-1}$ for all the classes. Additionally, the majority of them are around $0.15$ except of number 1, which is the least variable class with a standard deviation around $0.10$.
 
 To study the similarity between classes, we compute the Euclidean distance between the mean images of the different digits, that is, between their sample mean vectors $\underline{\bar{x}}_0, \ldots, \underline{\bar{x}}_9 \in \mathbb{R}^{784}$. We use the Euclidean distance because all pixels are measured on the same scale, and the Mahalanobis distance cannot be computed since the sample covariance matrix is singular (some pixels have zero variance).
@@ -179,6 +180,7 @@ abline(h = 10, lty = 2, col = "red")   # 10 % line (perfectly balanced)
 legend("topright", legend = "Perfect balance (10% per digit)",
        lty = 2, col = "red", bty = "n")
 ```
+
 The barplot shows clearly that there is no significant imbalance, as all the classes percentage are considerably close to the perfect balance line. This fact has several implications, such as making accuracy a reliable metric.
 
 However, we have checked balancing in the total dataset. In order to guarantee that the train, validation and test sets are representative of the whole dataset., each split must have a similar behaviour, which means they need to be also balanced. We check it now:
@@ -189,3 +191,124 @@ round(100 * rbind(train      = prop.table(table(y_train)),
                   test       = prop.table(table(y_test))), 2)
 ```
 We obtain similar results, so our division is appropriate for the following tasks.
+
+# Part 2. Noise generation using the multivariate normal distribution.
+## 2.1
+In this section we will add random noise to our training dataset. We will generate three noise levels using a multivariate normal distribution. Given the vector $\mathbf{x}_i\in\mathbb{R}^784$ corresponding to image $i$, the noisy version will be:
+$$\mathbf{x}_i^* = \mathbf{x}_i + \epsilon_i,$$
+where $\epsilon_i$ is obtained from the distribuition $\mathcal{N}_784(\mathbf{0},\sigma^2\mathbf{I}_784)$.
+
+As the noise has mean 0, adding the noise to the images will not make them any brighter or darker, on average
+
+The covariance matrix of the noise distribution, $\Sigma = \sigma^2\mathbf{I}_784$, is a scalar matrix. This implies the noise components for each pixel are uncorrelated and identically distributed. Furthermore, as the noise generated follows a multivariate normal distribuition, the components corresponding to each pixel will be independent from each other.
+
+The marginal distribution of each noise component is therefore $\mathcal{N}(0,\sigma^2)$.
+
+
+To model three different noise levels, we will generate noisy versions using three different values of $\sigma$. To decide which values of $\sigma$ are apropiate, we will consider the Signal to Noise ratio, which is commonly defined as:
+$$SNR=\frac{\bar{\mathbf{X}^2}}{\sigma^2},$$
+where $\bar{\mathbf{X}^2}$ represents the mean value of the signal squared, in this case, of the pixels. 
+
+As the images are mostly white background, the mean square value will be dragged towards 0, which will result in lower noise than we want. To avoid this, we will calculate the mean square of the pixels which are not completely white.
+
+A signal to noise ratio greater than one corresponds to low noise, or a clean signal. Conversely, a signal to noise ratio lower than 1 corresponds to a noisy image. We will aim to have an $SNR$ of 2 for the low noise signal, 1 for the medium noise signal and 0.5 for the high noise signal.
+
+```{r}
+musq <- mean(X_train[X_train!=0]^2) # Calculate the square mean of the non zero pixels
+sigmaLow <- sqrt(musq/2)
+sigmaLow
+sigmaMedium <- sqrt(musq)
+sigmaMedium
+sigmaHigh <- sqrt(musq/0.5) 
+sigmaHigh
+```
+
+We obtain the following values for $\sigma$. Low noise, $\sigma = 0.5411652$, medium noise, $\sigma = 0.7653232$, and high noise, $\sigma = 1.08233$.
+
+## 2.2 
+We will now generate the noisy datasets. To ensure repoducibility we set the seed once before generating the noise. This ensure the noise generated is the same on every execution while being different for every pixel in every image. 
+
+As the generated noise could make the pixel value fall out of the $[0,1]$ interval, we will clip the values after the noise has been added. Therefore if a certain pixel will end up with a value lower than 0, we set it to 0, and it its value will be greater than 1, we set it to 1.
+
+```{r}
+set.seed(seed) # Seed for reproducibility
+
+m = ncol(X_train) # Number of pixels
+
+# Initialize copies of the dataset
+X_low <- X_train
+X_medium <- X_train
+X_high <- X_train
+
+# Loop over the images
+for (i in 1:n_train){
+  # Noise generation
+  epsLow <- rnorm(m, mean = 0, sd = sigmaLow)
+  epsMedium <- rnorm(m, mean = 0, sd = sigmaMedium)
+  epsHigh <- rnorm(m, mean = 0, sd = sigmaHigh)
+  # Adding noise to the images
+  X_low[i,] = X_low[i,] + epsLow
+  X_medium[i,] = X_medium[i,] + epsMedium
+  X_high[i,] = X_high[i,] + epsHigh 
+}
+# Clipping values to [0,1]
+X_low <- pmin(pmax(X_low,0),1)
+X_medium <- pmin(pmax(X_medium,0),1)
+X_high <- pmin(pmax(X_high,0),1)
+```
+# 2.3
+To showcase the noisy images we have generated, we will show the same set of 30 images we displayed for the clean dataset with each noise level added.
+
+Clean images.
+```{r}
+set.seed(seed)
+par(mfrow = c(5, 6), mar = c(0.1, 0.1, 0.1, 0.1))
+
+for (d in 0:9) {
+  id <- sample(which(y_train == d), 3)
+  for (i in id) {
+    show_digit(X_train[i, ])
+  }
+}
+```
+
+Low noise images, $\sigma = 0.5411652$.
+```{r}
+set.seed(seed)
+par(mfrow = c(5, 6), mar = c(0.1, 0.1, 0.1, 0.1))
+
+for (d in 0:9) {
+  id <- sample(which(y_train == d), 3)
+  for (i in id) {
+    show_digit(X_low[i, ])
+  }
+}
+```
+
+Medium noise images, $\sigma = 0.7653232$.
+```{r}
+set.seed(seed)
+par(mfrow = c(5, 6), mar = c(0.1, 0.1, 0.1, 0.1))
+
+for (d in 0:9) {
+  id <- sample(which(y_train == d), 3)
+  for (i in id) {
+    show_digit(X_medium[i, ])
+  }
+}
+```
+
+High noise images, $\sigma = 1.08233$.
+```{r}
+set.seed(seed)
+par(mfrow = c(5, 6), mar = c(0.1, 0.1, 0.1, 0.1))
+
+for (d in 0:9) {
+  id <- sample(which(y_train == d), 3)
+  for (i in id) {
+    show_digit(X_high[i, ])
+  }
+}
+```
+
+In the images we can clearly see that increasing $\sigma$ makes the digits more and more unrecognisable.
